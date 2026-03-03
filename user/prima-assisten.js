@@ -1,36 +1,86 @@
-// prima-assisten.js
+import { isJidGroup } from 'baileys';
 
-// WhatsApp Assistant Plugin
-// Auto-replies to private messages and forwards complaints to a group
+const COMPLAINT_GROUP_JID = '120363407082641884@g.us';
 
-const WhatsAppAPI = require('whatsapp-api');
+const COMPLAINT_KEYWORDS = [
+  'keluhan',
+  'komplain', 
+  'masalah',
+  'error',
+  'gagal',
+  'tidak bisa',
+  'jelek',
+  'buruk',
+  'kecewa',
+  'protes'
+];
 
-class PrimaAssisten {
-    constructor() {
-        this.autoReplyMessage = "Thank you for your message! We will get back to you shortly.";
-        this.complaintGroupId = 'group-chat-id'; // Replace with actual group chat ID
+const AUTO_REPLY_MESSAGES = {
+  greeting: 'Terima kasih telah menghubungi kami. Pesan Anda telah kami terima dan akan segera kami balas oleh tim customer service kami. 🙏',
+  greeting_en: 'Thank you for contacting us. Your message has been received and will be responded to by our customer service team shortly. 🙏'
+};
+
+export default class PrimaAssisten {
+  constructor(sock, store) {
+    this.sock = sock;
+    this.store = store;
+    this.name = 'prima-assisten';
+    this.description = 'WhatsApp Assistant untuk Customer Service';
+    this.version = '1.0.0';
+  }
+
+  async onMessage(message) {
+    const { from, body, isGroup } = message;
+
+    if (isGroup) return;
+
+    const isComplaint = this.detectComplaint(body);
+
+    await this.sendAutoReply(from);
+
+    if (isComplaint) {
+      await this.forwardToComplaintGroup(message);
     }
+  }
 
-    onPrivateMessage(message) {
-        this.autoReply(message);
-        if (this.isComplaint(message)) {
-            this.forwardToGroup(message);
-        }
-    }
+  detectComplaint(messageBody) {
+    const lowerBody = messageBody.toLowerCase();
+    return COMPLAINT_KEYWORDS.some(keyword => 
+      lowerBody.includes(keyword)
+    );
+  }
 
-    autoReply(message) {
-        WhatsAppAPI.sendMessage(message.from, this.autoReplyMessage);
+  async sendAutoReply(jid) {
+    try {
+      await this.sock.sendMessage(jid, {
+        text: AUTO_REPLY_MESSAGES.greeting
+      });
+    } catch (error) {
+      console.error(`Error sending auto-reply to ${jid}:`, error);
     }
+  }
 
-    isComplaint(message) {
-        const complaintKeywords = ['complaint', 'issue', 'problem'];
-        return complaintKeywords.some(keyword => message.body.toLowerCase().includes(keyword));
-    }
+  async forwardToComplaintGroup(message) {
+    try {
+      const { from, body, timestamp } = message;
+      const senderName = message.pushName || from;
+      const formattedTime = new Date(timestamp * 1000).toLocaleString('id-ID');
 
-    forwardToGroup(message) {
-        const forwardedMessage = `Complaint from ${message.from}: ${message.body}`;
-        WhatsAppAPI.sendMessage(this.complaintGroupId, forwardedMessage);
+      const complaintMessage = `
+⚠️ KELUHAN BARU
+
+👤 Dari: ${senderName} (${from})
+📝 Pesan: ${body}
+🕐 Waktu: ${formattedTime}
+      `.trim();
+
+      await this.sock.sendMessage(COMPLAINT_GROUP_JID, {
+        text: complaintMessage
+      });
+
+      console.log(`✅ Keluhan dari ${senderName} berhasil diteruskan ke grup`);
+    } catch (error) {
+      console.error('Error forwarding complaint to group:', error);
     }
+  }
 }
-
-module.exports = PrimaAssisten;
